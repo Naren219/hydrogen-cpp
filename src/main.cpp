@@ -20,10 +20,10 @@ int main(int argc, char* argv[]) {
     std::vector<Token> tokens = tokenizer.tokenize();
 
     Parser parser(std::move(tokens));
-    NodeExit tree = parser.parse();
+    NodeProgram program = parser.parse();
 
-    Generator generator(tree);
-    std::string asm_code = generator.generate();
+    Generator generator(program);
+    std::string asm_code = generator.generate_program();
     {
         std::fstream file("out.s", std::ios::out | std::ios::trunc);
         file << asm_code;
