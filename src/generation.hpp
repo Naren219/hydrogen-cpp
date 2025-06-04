@@ -24,9 +24,10 @@ class Generator {
                 const auto& ident_expr = std::get<NodeExprIdent>(exit_expr.var);
                 const std::string& ident_name = ident_expr.ident.value;
                 if (m_vars.count(ident_name)) {
-                    // Variable found, use its assigned register
-                    std::string var_reg = "w" + std::to_string(m_vars.at(ident_name).register_index);
-                    code += "\tmov\tw0, " + var_reg + "\n";
+                    // Variable found, calculate offset from current stack pointer
+                    size_t var_stack_pos = m_vars.at(ident_name).stack_offset;
+                    size_t offset_from_current_sp = m_stack_size - var_stack_pos - 16;
+                    code += "\tldr\tw0, [sp, #" + std::to_string(offset_from_current_sp) + "]\n";
                 } else {
                     // Variable not found, error or default
                     std::cerr << "Error: Undeclared variable '" << ident_name << "' used in exit statement.\n";
@@ -43,10 +44,10 @@ class Generator {
 
                 if (m_vars.find(ident) == m_vars.end()) {
                     const auto& int_lit = std::get<NodeExprIntLit>(let_stmt.value.var).int_lit;
-                    std::string reg = "w" + std::to_string(m_current_register_idx);
-                    code += "\tmov\t" + reg + ", #" + int_lit.value + "\n";
-                    m_vars[ident] = Var{m_current_register_idx};
-                    m_current_register_idx++; // Increment for the next variable
+                    code += "\tmov\tw1, #" + int_lit.value + "\n";
+                    code += "\tstr\tw1, [sp, #-16]!\n";
+                    m_vars[ident] = Var{m_stack_size};
+                    m_stack_size += 16; // Each variable takes 16 bytes on stack
                 } else {
                     std::cerr << "Error: Variable '" << ident << "' already declared.\n";
                 }
@@ -56,12 +57,13 @@ class Generator {
                     const auto& ident_expr = std::get<NodeExprIdent>(let_stmt.value.var);
                     const std::string& source_ident = ident_expr.ident.value;
                     if (m_vars.count(source_ident)) {
-                        // Source variable found, copy its value to a new register
-                        std::string source_reg = "w" + std::to_string(m_vars.at(source_ident).register_index);
-                        std::string dest_reg = "w" + std::to_string(m_current_register_idx);
-                        code += "\tmov\t" + dest_reg + ", " + source_reg + "\n";
-                        m_vars[ident] = Var{m_current_register_idx};
-                        m_current_register_idx++;
+                        // Source variable found, load from its stack offset and store to new location
+                        size_t source_stack_pos = m_vars.at(source_ident).stack_offset;
+                        size_t source_offset_from_sp = m_stack_size - source_stack_pos - 16;
+                        code += "\tldr\tw1, [sp, #" + std::to_string(source_offset_from_sp) + "]\n";
+                        code += "\tstr\tw1, [sp, #-16]!\n";
+                        m_vars[ident] = Var{m_stack_size};
+                        m_stack_size += 16;
                     } else {
                         std::cerr << "Error: Undeclared variable '" << source_ident << "' used in let statement.\n";
                     }
@@ -70,6 +72,7 @@ class Generator {
                 }
             }
             // TODO: Handle other types for let_stmt.value.var (e.g., expressions)
+            return code;
         }
 
         std::string generate_program() {
@@ -102,11 +105,10 @@ class Generator {
     private:
 
         struct Var {
-            // Let's rename stack_location to register_index to be more accurate for current usage
-            size_t register_index; 
+            size_t stack_offset; // Offset from current stack pointer
         };
 
         NodeProgram m_program;
-        size_t m_current_register_idx = 1; // Start allocating from w1 (w0 is for exit status)
+        size_t m_stack_size = 0; // Track total stack space used
         std::unordered_map<std::string, Var> m_vars;
 };

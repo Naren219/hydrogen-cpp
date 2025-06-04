@@ -1,0 +1,56 @@
+# Build artifacts
+build/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+*.cmake
+
+# C++ compilation artifacts
+*.o
+*.obj
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+
+# Generated files from hydrogen compiler
+out.s
+out.o
+out_exec
+*.s
+*.asm
+
+# Executables
+hydro
+hydrogen
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Debug files
+*.dSYM/
+*.pdb
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+
+# Package managers
+conan/
+vcpkg/
+
+# Testing artifacts
+test_output/
+*.test
+
+# Backup files
+*.bak
+*.backup 
