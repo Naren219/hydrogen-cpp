@@ -4,8 +4,8 @@
 #include <vector>
 #include <optional>
 #include <iostream>
+#include <memory>
 #include "tokenization.hpp"
-#include "arena.hpp"
 
 // Forward declarations
 struct NodeExpr;
@@ -19,13 +19,13 @@ struct NodeExprIdent {
 };
 
 struct BinExprAdd {
-    NodeExpr* left;
-    NodeExpr* right;
+    std::shared_ptr<NodeExpr> left;
+    std::shared_ptr<NodeExpr> right;
 };
 
 struct BinExprMul {
-    NodeExpr* left;
-    NodeExpr* right;
+    std::shared_ptr<NodeExpr> left;
+    std::shared_ptr<NodeExpr> right;
 };
 
 struct BinExpr {
@@ -56,7 +56,7 @@ struct NodeProgram {
 class Parser {
 public:
     explicit Parser(std::vector<Token> tokens)
-        : m_tokens(std::move(tokens)), m_pos(0), m_arena() {}
+        : m_tokens(std::move(tokens)), m_pos(0) {}
 
     NodeProgram parse() {
         NodeProgram program;
@@ -107,18 +107,9 @@ public:
         return program;
     }
 
-    // Get arena statistics
-    void print_arena_stats() const {
-        std::cout << "Arena Stats:" << std::endl;
-        std::cout << "  Total allocated: " << m_arena.total_allocated() << " bytes" << std::endl;
-        std::cout << "  Memory used: " << m_arena.memory_used() << " bytes" << std::endl;
-        std::cout << "  Efficiency: " << (100.0 * m_arena.memory_used() / m_arena.total_allocated()) << "%" << std::endl;
-    }
-
 private:
     std::vector<Token> m_tokens;
     size_t m_pos;
-    mutable Arena m_arena; // mutable because allocation happens in const methods
 
     std::optional<Token> peek(size_t offset = 0) const {
         if (m_pos + offset < m_tokens.size()) {
@@ -159,11 +150,10 @@ private:
                     return std::nullopt;
                 }
                 
-                // Allocate nodes in arena
-                NodeExpr* left_ptr = m_arena.allocate<NodeExpr>(*left);
-                NodeExpr* right_ptr = m_arena.allocate<NodeExpr>(*right);
-                
-                BinExprAdd add_expr{left_ptr, right_ptr};
+                BinExprAdd add_expr{
+                    std::make_shared<NodeExpr>(*left),
+                    std::make_shared<NodeExpr>(*right)
+                };
                 NodeExpr new_expr;
                 new_expr.var = BinExpr{add_expr};
                 left = new_expr;
@@ -191,11 +181,10 @@ private:
                     return std::nullopt;
                 }
                 
-                // Allocate nodes in arena
-                NodeExpr* left_ptr = m_arena.allocate<NodeExpr>(*left);
-                NodeExpr* right_ptr = m_arena.allocate<NodeExpr>(*right);
-                
-                BinExprMul mul_expr{left_ptr, right_ptr};
+                BinExprMul mul_expr{
+                    std::make_shared<NodeExpr>(*left),
+                    std::make_shared<NodeExpr>(*right)
+                };
                 NodeExpr new_expr;
                 new_expr.var = BinExpr{mul_expr};
                 left = new_expr;
