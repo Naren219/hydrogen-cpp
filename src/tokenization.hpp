@@ -11,7 +11,9 @@ enum class TokenType {
     close_paren,
     ident,
     let,
-    eq
+    eq,
+    plus,
+    star
 };
 
 struct Token {
@@ -63,6 +65,10 @@ class Tokenizer {
                     tokens.push_back(Token{TokenType::semi, ";"});
                 } else if (c == '=') {
                     tokens.push_back(Token{TokenType::eq, "="});
+                } else if (c == '+') {
+                    tokens.push_back(Token{TokenType::plus, "+"});
+                } else if (c == '*') {
+                    tokens.push_back(Token{TokenType::star, "*"});
                 } else {
                     throw std::runtime_error("Unexpected character: " + std::string(1, c));
                 }

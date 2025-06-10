@@ -1,5 +1,5 @@
-let x = 42;
-let z = 42;
-let a = 23;
-let y = x;
-exit(y);
+let x = 3;
+let y = 4;
+let z = x * y + 2;
+let final = (z + 1) * (x + y);
+exit(final);

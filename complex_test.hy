@@ -1,0 +1,14 @@
+let a = 1;
+let b = 2;
+let c = 3;
+let d = 4;
+let e = 5;
+let f = a + b;
+let g = c * d;
+let h = f + g;
+let i = (a + b) * (c + d);
+let j = (f * g) + (h * i);
+let k = (a + b + c) * (d + e);
+let l = k + j + h + g + f;
+let result = (l + a) * (b + c) + (d * e);
+exit(result); 

@@ -1,0 +1,2 @@
+## learnings
+for our expressions, we have a circular dependency with a `BinExpr` and `NodeExpr` which isn't allowed since we don't know the exact size to allocate when defining each object. to solve this, we use pointers instead. however, this creates issues with cpu cache as we'll get pointers to random spots in memory which is not optimal for cache (which queries for objects in chunks). thus, we can use an arena to get a huge block of memory and store all pointers in a single chain. 
