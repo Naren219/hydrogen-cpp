@@ -61,6 +61,30 @@ class Generator {
                     code += "\tmul\tw0, w0, w1\n";     // Multiply them
                     code += "\tstr\tw0, [sp, #-16]!\n"; // Push result back
                     m_stack_size -= 16; // Net effect: two pops, one push = -16
+                } else if (std::holds_alternative<BinExprDiv>(bin_expr.var)) {
+                    const auto& div_expr = std::get<BinExprDiv>(bin_expr.var);
+                    // Generate code for left operand (pushes to stack)
+                    code += generate_expr(*div_expr.left);
+                    // Generate code for right operand (pushes to stack)
+                    code += generate_expr(*div_expr.right);
+                    // Pop both operands and divide them
+                    code += "\tldr\tw1, [sp], #16\n";  // Pop right operand to w1
+                    code += "\tldr\tw0, [sp], #16\n";  // Pop left operand to w0
+                    code += "\tudiv\tw0, w0, w1\n";    // Divide them
+                    code += "\tstr\tw0, [sp, #-16]!\n"; // Push result back
+                    m_stack_size -= 16; // Net effect: two pops, one push = -16
+                } else if (std::holds_alternative<BinExprSub>(bin_expr.var)) {
+                    const auto& sub_expr = std::get<BinExprSub>(bin_expr.var);
+                    // Generate code for left operand (pushes to stack)
+                    code += generate_expr(*sub_expr.left);
+                    // Generate code for right operand (pushes to stack)
+                    code += generate_expr(*sub_expr.right);
+                    // Pop both operands and subtract them
+                    code += "\tldr\tw1, [sp], #16\n";  // Pop right operand to w1
+                    code += "\tldr\tw0, [sp], #16\n";  // Pop left operand to w0
+                    code += "\tsub\tw0, w0, w1\n";     // Subtract them (left - right)
+                    code += "\tstr\tw0, [sp, #-16]!\n"; // Push result back
+                    m_stack_size -= 16; // Net effect: two pops, one push = -16
                 }
             }
             return code;

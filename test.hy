@@ -1,5 +1,2 @@
-let x = 3;
-let y = 4;
-let z = x * y + 2;
-let final = (z + 1) * (x + y);
-exit(final);
+let result = (10 + 3) * 2;
+exit(result);

@@ -1,14 +1,12 @@
 let a = 1;
-let b = 2;
-let c = 3;
-let d = 4;
-let e = 5;
-let f = a + b;
-let g = c * d;
-let h = f + g;
-let i = (a + b) * (c + d);
-let j = (f * g) + (h * i);
-let k = (a + b + c) * (d + e);
-let l = k + j + h + g + f;
-let result = (l + a) * (b + c) + (d * e);
-exit(result); 
+let b = 1;
+let c = 1;
+let d = 1;
+let e = 1;
+let f = 1;
+let g = 1;
+let h = 1;
+let i = 1;
+
+let j = ((((((((a + b) + c) + d) + e) + f) + g) + h) + i);
+exit(j);

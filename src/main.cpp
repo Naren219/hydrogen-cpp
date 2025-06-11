@@ -22,9 +22,6 @@ int main(int argc, char* argv[]) {
     Parser parser(std::move(tokens));
     NodeProgram program = parser.parse();
 
-    // Print arena allocation statistics
-    parser.print_arena_stats();
-
     Generator generator(program);
     std::string asm_code = generator.generate_program();
     {
@@ -39,4 +36,4 @@ int main(int argc, char* argv[]) {
     int run_status = system("./out_exec");
 
     return WEXITSTATUS(run_status);
-}
+};
