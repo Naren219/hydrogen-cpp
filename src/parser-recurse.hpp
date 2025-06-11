@@ -1,69 +1,3 @@
-#pragma once
-
-#include <variant>
-#include <vector>
-#include <optional>
-#include <iostream>
-#include <memory>
-#include <unordered_map>
-#include "tokenization.hpp"
-
-// Forward declarations
-struct NodeExpr;
-
-struct NodeExprIntLit {
-    Token int_lit;
-};
-
-struct NodeExprIdent {
-    Token ident;
-};
-
-struct BinExprAdd {
-    std::shared_ptr<NodeExpr> left;
-    std::shared_ptr<NodeExpr> right;
-};
-
-struct BinExprMul {
-    std::shared_ptr<NodeExpr> left;
-    std::shared_ptr<NodeExpr> right;
-};
-
-struct BinExprDiv {
-    std::shared_ptr<NodeExpr> left;
-    std::shared_ptr<NodeExpr> right;
-};
-
-struct BinExprSub {
-    std::shared_ptr<NodeExpr> left;
-    std::shared_ptr<NodeExpr> right;
-};
-
-struct BinExpr {
-    std::variant<BinExprAdd, BinExprMul, BinExprDiv, BinExprSub> var;
-};  
-
-struct NodeExpr {
-    std::variant<NodeExprIntLit, NodeExprIdent, BinExpr> var;
-};
-
-struct NodeStatementExit {
-    NodeExpr exit;
-};
-
-struct NodeStatementLet {
-    Token ident;
-    NodeExpr value;
-};
-
-struct NodeStatement {
-    std::variant<NodeStatementExit, NodeStatementLet> expr;
-};
-
-struct NodeProgram {
-    std::vector<NodeStatement> statements;
-};
-
 class Parser {
 public:
     explicit Parser(std::vector<Token> tokens)
@@ -121,13 +55,6 @@ public:
 private:
     std::vector<Token> m_tokens;
     size_t m_pos;
-    
-    std::unordered_map<TokenType, int> m_precedence = {
-        {TokenType::plus, 1},
-        {TokenType::minus, 1},
-        {TokenType::star, 2},
-        {TokenType::slash, 2}
-    };
 
     std::optional<Token> peek(size_t offset = 0) const {
         if (m_pos + offset < m_tokens.size()) {
@@ -151,16 +78,101 @@ private:
         return std::nullopt;
     }
 
-    int get_precedence(TokenType type) {
-        auto it = m_precedence.find(type);
-        if (it != m_precedence.end()) {
-            return it->second;
+    // Expression parsing with operator precedence
+    // expr -> term (('+') term)*
+    std::optional<NodeExpr> parse_expr() {
+        auto left = parse_term();
+        if (!left.has_value()) {
+            return std::nullopt;
         }
-        return 0; // Default precedence for non-operators
+
+        while (auto token = peek()) {
+            if (token->type == TokenType::plus) {
+                consume(); // consume '+'
+                auto right = parse_term();
+                if (!right.has_value()) {
+                    std::cerr << "Parse error: expected expression after '+'" << std::endl;
+                    return std::nullopt;
+                }
+                
+                BinExprAdd add_expr{
+                    std::make_shared<NodeExpr>(*left),
+                    std::make_shared<NodeExpr>(*right)
+                };
+                NodeExpr new_expr;
+                new_expr.var = BinExpr{add_expr};
+                left = new_expr;
+            } else if (token->type == TokenType::minus) {
+                consume(); // consume '-'
+                auto right = parse_term();
+                if (!right.has_value()) {
+                    std::cerr << "Parse error: expected expression after '-'" << std::endl;
+                    return std::nullopt;
+                }
+
+                BinExprSub sub_expr{
+                    std::make_shared<NodeExpr>(*left),
+                    std::make_shared<NodeExpr>(*right)
+                };  
+                NodeExpr new_expr;
+                new_expr.var = BinExpr{sub_expr};
+                left = new_expr;
+            } else {
+                break;
+            }
+        }
+
+        return left;
     }
 
-    // Parse primary expressions (numbers, identifiers, parentheses)
-    std::optional<NodeExpr> parse_primary() {
+    // term -> factor (('*') factor)*
+    std::optional<NodeExpr> parse_term() {
+        auto left = parse_factor();
+        if (!left.has_value()) {
+            return std::nullopt;
+        }
+
+        while (auto token = peek()) {
+            if (token->type == TokenType::star) {
+                consume(); // consume '*'
+                auto right = parse_factor();
+                if (!right.has_value()) {
+                    std::cerr << "Parse error: expected expression after '*'" << std::endl;
+                    return std::nullopt;
+                }
+                
+                BinExprMul mul_expr{
+                    std::make_shared<NodeExpr>(*left),
+                    std::make_shared<NodeExpr>(*right)
+                };
+                NodeExpr new_expr;
+                new_expr.var = BinExpr{mul_expr};
+                left = new_expr;
+            } else if (token->type == TokenType::slash) {
+                consume(); // consume '/'
+                auto right = parse_factor();
+                if (!right.has_value()) {
+                    std::cerr << "Parse error: expected expression after '/'" << std::endl;
+                    return std::nullopt;
+                }
+
+                BinExprDiv div_expr{
+                    std::make_shared<NodeExpr>(*left),
+                    std::make_shared<NodeExpr>(*right)
+                };
+                NodeExpr new_expr;
+                new_expr.var = BinExpr{div_expr};
+                left = new_expr;
+            } else {
+                break;
+            }
+        }
+
+        return left;    
+    }
+
+    // factor -> int_lit | ident | '(' expr ')'
+    std::optional<NodeExpr> parse_factor() {
         auto token = peek();
         if (!token.has_value()) {
             return std::nullopt;
@@ -191,69 +203,5 @@ private:
         }
 
         return std::nullopt;
-    }
-
-    // Precedence climbing expression parser
-    std::optional<NodeExpr> parse_expr(int min_precedence = 0) {
-        auto left = parse_primary();
-        if (!left.has_value()) {
-            return std::nullopt;
-        }
-
-        while (true) {
-            auto op_token = peek();
-            if (!op_token.has_value()) {
-                break; // End of input
-            }
-
-            int precedence = get_precedence(op_token->type);
-            if (precedence == 0 || precedence < min_precedence) {
-                break; // Not an operator or precedence too low
-            }
-
-            auto op = consume(); // consume the operator
-            auto right = parse_expr(precedence + 1);
-            if (!right.has_value()) {
-                std::cerr << "Parse error: expected expression after operator '" << op->value << "'" << std::endl;
-                return std::nullopt;
-            }
-
-            // Create binary expression based on operator type
-            if (op->type == TokenType::plus) {
-                BinExprAdd add_expr{
-                    std::make_shared<NodeExpr>(*left),
-                    std::make_shared<NodeExpr>(*right)
-                };
-                NodeExpr new_expr;
-                new_expr.var = BinExpr{add_expr};
-                left = new_expr;
-            } else if (op->type == TokenType::minus) {
-                BinExprSub sub_expr{
-                    std::make_shared<NodeExpr>(*left),
-                    std::make_shared<NodeExpr>(*right)
-                };
-                NodeExpr new_expr;
-                new_expr.var = BinExpr{sub_expr};
-                left = new_expr;
-            } else if (op->type == TokenType::star) {
-                BinExprMul mul_expr{
-                    std::make_shared<NodeExpr>(*left),
-                    std::make_shared<NodeExpr>(*right)
-                };
-                NodeExpr new_expr;
-                new_expr.var = BinExpr{mul_expr};
-                left = new_expr;
-            } else if (op->type == TokenType::slash) {
-                BinExprDiv div_expr{
-                    std::make_shared<NodeExpr>(*left),
-                    std::make_shared<NodeExpr>(*right)
-                };
-                NodeExpr new_expr;
-                new_expr.var = BinExpr{div_expr};
-                left = new_expr;
-            }
-        }
-
-        return left;
     }
 };

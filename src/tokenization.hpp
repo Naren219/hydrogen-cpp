@@ -13,7 +13,9 @@ enum class TokenType {
     let,
     eq,
     plus,
-    star
+    star,
+    slash,
+    minus
 };
 
 struct Token {
@@ -69,6 +71,10 @@ class Tokenizer {
                     tokens.push_back(Token{TokenType::plus, "+"});
                 } else if (c == '*') {
                     tokens.push_back(Token{TokenType::star, "*"});
+                } else if (c == '/') {
+                    tokens.push_back(Token{TokenType::slash, "/"});
+                } else if (c == '-') {
+                    tokens.push_back(Token{TokenType::minus, "-"});
                 } else {
                     throw std::runtime_error("Unexpected character: " + std::string(1, c));
                 }

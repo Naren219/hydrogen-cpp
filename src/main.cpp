@@ -36,4 +36,4 @@ int main(int argc, char* argv[]) {
     int run_status = system("./out_exec");
 
     return WEXITSTATUS(run_status);
-}
+};
