@@ -1,2 +1,5 @@
-let result = (10 + 3) * 2;
-exit(result);
+let x = 2;
+if (x + 2) {
+    exit(4);
+}
+exit(5);

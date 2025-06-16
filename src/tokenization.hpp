@@ -15,7 +15,10 @@ enum class TokenType {
     plus,
     star,
     slash,
-    minus
+    minus,
+    open_brace,
+    close_brace,
+    if_,
 };
 
 struct Token {
@@ -48,6 +51,9 @@ class Tokenizer {
                     } else if (buf == "let") {
                         tokens.push_back(Token{TokenType::let, buf});
                         buf.clear();
+                    } else if (buf == "if") {
+                        tokens.push_back(Token{TokenType::if_, buf});
+                        buf.clear();
                     } else {
                         tokens.push_back(Token{TokenType::ident, buf});
                         buf.clear();
@@ -75,6 +81,10 @@ class Tokenizer {
                     tokens.push_back(Token{TokenType::slash, "/"});
                 } else if (c == '-') {
                     tokens.push_back(Token{TokenType::minus, "-"});
+                } else if (c == '{') {
+                    tokens.push_back(Token{TokenType::open_brace, "{"});
+                } else if (c == '}') {
+                    tokens.push_back(Token{TokenType::close_brace, "}"});
                 } else {
                     throw std::runtime_error("Unexpected character: " + std::string(1, c));
                 }
@@ -87,7 +97,7 @@ class Tokenizer {
 
         std::optional<char> peak(int offset = 0) const {
             if (m_pos + offset < m_src.length()) {
-                return m_src[m_pos];
+                return m_src[m_pos + offset];
             }
             return std::nullopt;
         }

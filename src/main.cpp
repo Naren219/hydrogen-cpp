@@ -29,8 +29,6 @@ int main(int argc, char* argv[]) {
         file << asm_code;
     }
 
-    std::cout << "Generated Assembly Code:\n" << asm_code << std::endl;
-
     int assemble_status = system("as -o out.o out.s");
     int link_status = system("ld -arch arm64 -o out_exec out.o -lSystem -syslibroot `xcrun --show-sdk-path` -e _main");
     int run_status = system("./out_exec");

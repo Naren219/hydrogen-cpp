@@ -3,15 +3,18 @@
 #include <vector>
 #include <variant>
 #include <unordered_map> // Corrected typo
+#include <map>
 #include <iostream> // For std::cerr
 #include "parser.hpp" // Assuming parser.hpp defines NodeProgram, NodeStatement, NodeExpr etc.
 
 
 class Generator {
     public:
-    
         inline explicit Generator(const NodeProgram program )
-            : m_program(std::move(program)) {}
+            : m_program(std::move(program)) {
+            // Initialize with global scope
+            m_scope_stack.push_back({});
+        }
 
         std::string generate_expr(const NodeExpr& expr) {
             std::string code;
@@ -23,8 +26,9 @@ class Generator {
             } else if (std::holds_alternative<NodeExprIdent>(expr.var)) {
                 const auto& ident_expr = std::get<NodeExprIdent>(expr.var);
                 const std::string& ident_name = ident_expr.ident.value;
-                if (m_vars.count(ident_name)) {
-                    size_t var_stack_pos = m_vars.at(ident_name).stack_offset;
+                auto var_opt = find_in_any_scope(ident_name);
+                if (var_opt) {
+                    size_t var_stack_pos = var_opt->stack_offset;
                     size_t offset_from_current_sp = m_stack_size - var_stack_pos - 16;
                     code += "\tldr\tw0, [sp, #" + std::to_string(offset_from_current_sp) + "]\n";
                     code += "\tstr\tw0, [sp, #-16]!\n"; // Push to stack
@@ -98,8 +102,9 @@ class Generator {
             } else if (std::holds_alternative<NodeExprIdent>(exit_expr.var)) {
                 const auto& ident_expr = std::get<NodeExprIdent>(exit_expr.var);
                 const std::string& ident_name = ident_expr.ident.value;
-                if (m_vars.count(ident_name)) {
-                    size_t var_stack_pos = m_vars.at(ident_name).stack_offset;
+                auto var_opt = find_in_any_scope(ident_name);
+                if (var_opt) {
+                    size_t var_stack_pos = var_opt->stack_offset;
                     size_t offset_from_current_sp = m_stack_size - var_stack_pos - 16;
                     code += "\tldr\tw0, [sp, #" + std::to_string(offset_from_current_sp) + "]\n";
                 } else {
@@ -113,6 +118,9 @@ class Generator {
                 code += "\tldr\tw0, [sp], #16\n"; // Pop result for exit
                 m_stack_size = old_stack_size; // Restore stack size
             }
+            // Add immediate exit after setting exit value
+            code += "\tmov\tx16, #1\n"; // syscall for exit
+            code += "\tsvc\t#0x80\n";   // make the syscall
             return code;
         }
 
@@ -120,8 +128,8 @@ class Generator {
             std::string code;
             const std::string& ident = let_stmt.ident.value;
             
-            if (m_vars.find(ident) != m_vars.end()) {
-                std::cerr << "Error: Variable '" << ident << "' already declared.\n";
+            if (find_in_current_scope(ident)) {
+                std::cerr << "Error: Variable '" << ident << "' already declared in current scope.\n";
                 return code;
             }
 
@@ -129,17 +137,18 @@ class Generator {
                 const auto& int_lit = std::get<NodeExprIntLit>(let_stmt.value.var).int_lit;
                 code += "\tmov\tw1, #" + int_lit.value + "\n";
                 code += "\tstr\tw1, [sp, #-16]!\n";
-                m_vars[ident] = Var{m_stack_size};
+                m_scope_stack.back()[ident] = Var{m_stack_size};
                 m_stack_size += 16;
             } else if (std::holds_alternative<NodeExprIdent>(let_stmt.value.var)) {
                 const auto& ident_expr = std::get<NodeExprIdent>(let_stmt.value.var);
                 const std::string& source_ident = ident_expr.ident.value;
-                if (m_vars.count(source_ident)) {
-                    size_t source_stack_pos = m_vars.at(source_ident).stack_offset;
+                auto var_opt = find_in_any_scope(source_ident);
+                if (var_opt) {
+                    size_t source_stack_pos = var_opt->stack_offset;
                     size_t source_offset_from_sp = m_stack_size - source_stack_pos - 16;
                     code += "\tldr\tw1, [sp, #" + std::to_string(source_offset_from_sp) + "]\n";
                     code += "\tstr\tw1, [sp, #-16]!\n";
-                    m_vars[ident] = Var{m_stack_size};
+                    m_scope_stack.back()[ident] = Var{m_stack_size};
                     m_stack_size += 16;
                 } else {
                     std::cerr << "Error: Undeclared variable '" << source_ident << "' used in let statement.\n";
@@ -149,9 +158,48 @@ class Generator {
                 size_t old_stack_size = m_stack_size;
                 code += generate_expr(let_stmt.value);
                 // The result is already on the stack, just record the variable
-                m_vars[ident] = Var{old_stack_size};
+                m_scope_stack.back()[ident] = Var{old_stack_size};
                 // Stack size is already updated by generate_expr
             }
+            return code;
+        }
+
+        std::string generate_if(const NodeStatementIf& if_stmt) {
+            std::string code;
+            size_t current_label = m_label_counter++;
+            
+            code += generate_expr(if_stmt.condition);
+            code += "\tldr\tw0, [sp], #16\n";
+            code += "\tcmp\tw0, #0\n";
+            code += "\tb.eq\t.L" + std::to_string(current_label) + "\n"; // if condition is false, jump to the end of the if statement instead of scope
+            code += generate_scope(if_stmt.then_scope);
+            code += "\t.L" + std::to_string(current_label) + ":\n";
+            return code;
+        }
+
+        std::string generate_scope(const NodeScope& scope) {
+            std::string code;
+            // Push new scope
+            m_scope_stack.push_back({});
+            
+            for (const auto& statement : scope.statements) {
+                if (std::holds_alternative<NodeStatementExit>(statement.expr)) {
+                    const auto& exit_stmt = std::get<NodeStatementExit>(statement.expr);
+                    code += generate_exit(exit_stmt.exit);
+                } else if (std::holds_alternative<NodeStatementLet>(statement.expr)) {
+                    const auto& let_stmt = std::get<NodeStatementLet>(statement.expr);
+                    code += generate_let(let_stmt);
+                } else if (std::holds_alternative<NodeStatementIf>(statement.expr)) {
+                    const auto& if_stmt = std::get<NodeStatementIf>(statement.expr);
+                    code += generate_if(if_stmt);
+                } else if (std::holds_alternative<NodeScope>(statement.expr)) {
+                    const auto& nested_scope = std::get<NodeScope>(statement.expr);
+                    code += generate_scope(nested_scope);
+                }
+            }
+            
+            // Pop scope
+            m_scope_stack.pop_back();
             return code;
         }
 
@@ -161,16 +209,22 @@ class Generator {
 
             for (const auto& statement : m_program.statements) {
                 if (std::holds_alternative<NodeStatementExit>(statement.expr)) {
-
                     const auto& exit_stmt = std::get<NodeStatementExit>(statement.expr);
                     code += generate_exit(exit_stmt.exit);
                 } else if (std::holds_alternative<NodeStatementLet>(statement.expr)) {
-
                     const auto& let_stmt = std::get<NodeStatementLet>(statement.expr);
                     code += generate_let(let_stmt);
+                } else if (std::holds_alternative<NodeStatementIf>(statement.expr)) {
+                    const auto& if_stmt = std::get<NodeStatementIf>(statement.expr);
+                    code += generate_if(if_stmt);
+                } else if (std::holds_alternative<NodeScope>(statement.expr)) {
+                    const auto& scope = std::get<NodeScope>(statement.expr);
+                    code += generate_scope(scope);
                 }
             }
 
+            // Add default exit with code 0 if no exit statement was encountered
+            code += "\tmov\tw0, #0\n";
             code += "\tmov\tx16, #1\n"; // syscall for exit
             code += "\tsvc\t#0x80\n";   // make the syscall
             return code;
@@ -190,5 +244,21 @@ class Generator {
 
         NodeProgram m_program;
         size_t m_stack_size = 0; // Track total stack space used
-        std::unordered_map<std::string, Var> m_vars;
+        std::vector<std::map<std::string, Var>> m_scope_stack; // Stack of variable maps
+        size_t m_label_counter = 0;
+
+        // Helper function to find variable in current scope
+        bool find_in_current_scope(const std::string& ident) {
+            return m_scope_stack.back().find(ident) != m_scope_stack.back().end();
+        }
+
+        // Helper function to find variable in any scope
+        std::optional<Var> find_in_any_scope(const std::string& ident) {
+            for (auto it = m_scope_stack.rbegin(); it != m_scope_stack.rend(); ++it) {
+                if (it->find(ident) != it->end()) {
+                    return it->at(ident);
+                }
+            }
+            return std::nullopt;
+        }
 };
