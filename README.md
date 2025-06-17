@@ -54,3 +54,46 @@ std::optional<NodeExpr> parse_expr(int min_precedence = 0) {
 ```
 
 We keep iterating min precedence by 1 to prevent an infinite loop. Once we get an operator with a lower precedence than what was passed into the recursive call, we break the recursive loop and go up the stack (from the most recent called). This higher-order expression is set to `right` and we keep the terms set to left to create the binary tree. 
+
+### variable management
+```cpp
+class SymbolTable {
+    std::vector<std::unordered_map<std::string, bool>> m_scopes;
+```
+Each scope is a map where the keys are the variable names and values are the respective declaration *stati* (plural for statuses lol). 
+
+```cpp
+// Search from innermost to outermost scope
+for (auto it = m_scopes.rbegin(); it != m_scopes.rend(); ++it) {
+    if (it->find(name) != it->end()) {
+        return true;
+    }
+}
+return false;
+```
+Used for variable shadowing (vars declared in the inner scopes should take precedence over global ones).
+
+### if elif else statements
+@[generation.hpp](./src/generation.hpp)
+```cpp
+code += "\tldr\tw0, [sp], #16\n";
+
+// Compare with 0 and branch if equal (false)
+code += "\tcmp\tw0, #0\n";
+const std::string skip_label = ".L" + std::to_string(current_label) + "_skip";
+code += "\tb.eq\t" + skip_label + "\n";
+
+code += generate_scope(if_stmt.then_scope);
+if (if_stmt.predicate) { // predicate meaning elif or else present
+    const std::string end_label = ".L" + std::to_string(current_label) + "_end";
+    code += "\tb\t" + end_label + "\n"; // b means to JUMP!
+    code += skip_label + ":\n";
+
+    code += generate_predicate(*if_stmt.predicate, end_label);
+    code += end_label + ":\n";
+} else {
+    code += skip_label + ":\n";
+}
+```
+
+Skip logic: If a given condition is false, the code jumps to a `skip_label` which is past the jump to the `end_label` (in case any clause is executed, the program should skip over all other clauses (aka be triggered by the end_label jump) before continuing onto the predicates).

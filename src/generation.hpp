@@ -96,6 +96,7 @@ class Generator {
 
         std::string generate_exit(const NodeExpr& exit_expr) {
             std::string code;
+            code += "\t# Exit\n";
             if (std::holds_alternative<NodeExprIntLit>(exit_expr.var)) {
                 const auto& int_lit = std::get<NodeExprIntLit>(exit_expr.var).int_lit;
                 code += "\tmov\tw0, #" + int_lit.value + "\n";
@@ -112,13 +113,11 @@ class Generator {
                     code += "\tmov\tw0, #0\n";
                 }
             } else if (std::holds_alternative<BinExpr>(exit_expr.var)) {
-                // For exit with complex expression, evaluate it and pop result
                 size_t old_stack_size = m_stack_size;
                 code += generate_expr(exit_expr);
                 code += "\tldr\tw0, [sp], #16\n"; // Pop result for exit
                 m_stack_size = old_stack_size; // Restore stack size
             }
-            // Add immediate exit after setting exit value
             code += "\tmov\tx16, #1\n"; // syscall for exit
             code += "\tsvc\t#0x80\n";   // make the syscall
             return code;
@@ -154,12 +153,9 @@ class Generator {
                     std::cerr << "Error: Undeclared variable '" << source_ident << "' used in let statement.\n";
                 }
             } else if (std::holds_alternative<BinExpr>(let_stmt.value.var)) {
-                // For let with complex expression, evaluate it and the result stays on stack
                 size_t old_stack_size = m_stack_size;
                 code += generate_expr(let_stmt.value);
-                // The result is already on the stack, just record the variable
                 m_scope_stack.back()[ident] = Var{old_stack_size};
-                // Stack size is already updated by generate_expr
             }
             return code;
         }
@@ -168,27 +164,23 @@ class Generator {
             std::string code;
             size_t current_label = m_label_counter++;
             
-            // Save current stack size
+            code += "\t# If\n";
             size_t old_stack_size = m_stack_size;
-            
-            // Generate code for condition
             code += generate_expr(if_stmt.condition);
             
             code += "\tldr\tw0, [sp], #16\n";
-            m_stack_size = old_stack_size; // Restore stack size after popping condition
+            m_stack_size = old_stack_size;
             
-            // Compare with 0 and branch if equal (false)
             code += "\tcmp\tw0, #0\n";
             const std::string skip_label = ".L" + std::to_string(current_label) + "_skip";
             code += "\tb.eq\t" + skip_label + "\n";
             
-            // Generate code for then scope
             code += generate_scope(if_stmt.then_scope);
+            
             if (if_stmt.predicate) {
                 const std::string end_label = ".L" + std::to_string(current_label) + "_end";
                 code += "\tb\t" + end_label + "\n";
                 code += skip_label + ":\n";
-
                 code += generate_predicate(*if_stmt.predicate, end_label);
                 code += end_label + ":\n";
             } else {
@@ -201,32 +193,28 @@ class Generator {
             std::string code;
             if (std::holds_alternative<NodeIfPredicateElse>(predicate.var)) {
                 const auto& else_predicate = std::get<NodeIfPredicateElse>(predicate.var);
+                code += "\t# Else\n";
                 code += generate_scope(else_predicate.scope);
             } else if (std::holds_alternative<NodeIfPredicateElif>(predicate.var)) {
                 const auto& elif_predicate = std::get<NodeIfPredicateElif>(predicate.var);
                 size_t current_label = m_label_counter++;
                 
-                // Save current stack size
+                code += "\t# Elif\n";
                 size_t old_stack_size = m_stack_size;
-                
-                // Generate code for condition
                 code += generate_expr(elif_predicate.condition);
                 
                 code += "\tldr\tw0, [sp], #16\n";
-                m_stack_size = old_stack_size; // Restore stack size after popping condition
+                m_stack_size = old_stack_size;
                 
-                // Compare with 0 and branch if equal (false)
                 const std::string skip_label = ".L" + std::to_string(current_label) + "_skip";
                 code += "\tcmp\tw0, #0\n";
                 code += "\tb.eq\t" + skip_label + "\n";
                 
-                // Generate code for then scope
                 code += generate_scope(elif_predicate.scope);
                 
                 code += "\tb\t" + end_label + "\n";
                 code += skip_label + ":\n";
                 
-                // Generate code for next predicate (if any)
                 if (elif_predicate.predicate) {
                     code += generate_predicate(*elif_predicate.predicate, end_label);
                 }
@@ -252,11 +240,38 @@ class Generator {
                 } else if (std::holds_alternative<NodeScope>(statement.expr)) {
                     const auto& nested_scope = std::get<NodeScope>(statement.expr);
                     code += generate_scope(nested_scope);
+                } else if (std::holds_alternative<NodeStatementAssign>(statement.expr)) {
+                    const auto& assign_stmt = std::get<NodeStatementAssign>(statement.expr);
+                    code += generate_assignment(assign_stmt);
                 }
             }
             
             // Pop scope
             m_scope_stack.pop_back();
+            return code;
+        }
+
+        std::string generate_assignment(const NodeStatementAssign& assign_stmt) {
+            std::string code;
+            const std::string& ident = assign_stmt.ident.value;
+            code += "\t# Assign " + ident + "\n";
+            
+            auto var_opt = find_in_any_scope(ident);
+            if (!var_opt) {
+                std::cerr << "Error: Undeclared variable '" << ident << "' in assignment.\n";
+                return code;
+            }
+
+            size_t old_stack_size = m_stack_size;
+            code += generate_expr(assign_stmt.value);
+            
+            code += "\tldr\tw0, [sp], #16\n";
+            m_stack_size = old_stack_size;
+            
+            size_t var_stack_pos = var_opt->stack_offset;
+            size_t offset_from_current_sp = m_stack_size - var_stack_pos - 16;
+            code += "\tstr\tw0, [sp, #" + std::to_string(offset_from_current_sp) + "]\n";
+            
             return code;
         }
 
@@ -277,10 +292,13 @@ class Generator {
                 } else if (std::holds_alternative<NodeScope>(statement.expr)) {
                     const auto& scope = std::get<NodeScope>(statement.expr);
                     code += generate_scope(scope);
+                } else if (std::holds_alternative<NodeStatementAssign>(statement.expr)) {
+                    const auto& assign_stmt = std::get<NodeStatementAssign>(statement.expr);
+                    code += generate_assignment(assign_stmt);
                 }
             }
 
-            // Add default exit with code 0 if no exit statement was encountered
+            code += "\t# Default exit\n";
             code += "\tmov\tw0, #0\n";
             code += "\tmov\tx16, #1\n"; // syscall for exit
             code += "\tsvc\t#0x80\n";   // make the syscall

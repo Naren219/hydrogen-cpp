@@ -1,13 +1,13 @@
 /*
-naren
-is better
-than dhanya
-//
+naren is
+better than
+dhanya
 */
-if (0) {
-    exit(3);
-} elif (1) {
-    exit(4);
-} else {
-    exit(5);
+
+let x = 0;
+
+if (1) {
+    x = 3
 }
+
+exit(x);
