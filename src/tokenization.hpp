@@ -19,6 +19,8 @@ enum class TokenType {
     open_brace,
     close_brace,
     if_,
+    else_,
+    elif,
 };
 
 struct Token {
@@ -35,14 +37,14 @@ class Tokenizer {
             std::string buf;
             std::vector<Token> tokens;
 
-            while(peak().has_value()) {
+            while(peek().has_value()) {
                 char c = consume();
                 if (isspace(c)) {
                     continue;
                 }
                 if (isalpha(c)) {
                     buf += c;
-                    while (peak().has_value() && isalpha(peak().value())) {
+                    while (peek().has_value() && isalpha(peek().value())) {
                         buf += consume();
                     }
                     if (buf == "exit") {
@@ -54,13 +56,19 @@ class Tokenizer {
                     } else if (buf == "if") {
                         tokens.push_back(Token{TokenType::if_, buf});
                         buf.clear();
+                    } else if (buf == "elif") {
+                        tokens.push_back(Token{TokenType::elif, buf});
+                        buf.clear();
+                    } else if (buf == "else") {
+                        tokens.push_back(Token{TokenType::else_, buf});
+                        buf.clear();
                     } else {
                         tokens.push_back(Token{TokenType::ident, buf});
                         buf.clear();
                     }
                 } else if (isdigit(c)) {
                     buf += c;
-                    while (peak().has_value() && isdigit(peak().value())) {
+                    while (peek().has_value() && isdigit(peek().value())) {
                         buf += consume();
                     }
                     tokens.push_back(Token{TokenType::int_lit, buf});
@@ -78,7 +86,27 @@ class Tokenizer {
                 } else if (c == '*') {
                     tokens.push_back(Token{TokenType::star, "*"});
                 } else if (c == '/') {
-                    tokens.push_back(Token{TokenType::slash, "/"});
+                    if (peek().has_value() && peek().value() == '/') {
+                        consume(); // consume the second '/'
+                        while (peek().has_value() && peek().value() != '\n') {
+                            consume(); // consume the rest of the line
+                        }
+                        if (peek().has_value()) {
+                            consume(); // consume the newline
+                        }
+                    } else if (peek().has_value() && peek().value() == '*') {
+                        consume(); // consume the '*'
+                        while (peek().has_value()) {
+                            if (peek().value() == '*' && peek(1).has_value() && peek(1).value() == '/') {
+                                consume(); // consume the '*'
+                                consume(); // consume the '/'
+                                break;
+                            }
+                            consume();
+                        }
+                    } else {
+                        tokens.push_back(Token{TokenType::slash, "/"});
+                    }
                 } else if (c == '-') {
                     tokens.push_back(Token{TokenType::minus, "-"});
                 } else if (c == '{') {
@@ -95,7 +123,7 @@ class Tokenizer {
 
     private:
 
-        std::optional<char> peak(int offset = 0) const {
+        std::optional<char> peek(int offset = 0) const {
             if (m_pos + offset < m_src.length()) {
                 return m_src[m_pos + offset];
             }

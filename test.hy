@@ -1,5 +1,13 @@
-let x = 2;
-if (x + 2) {
+/*
+naren
+is better
+than dhanya
+//
+*/
+if (0) {
+    exit(3);
+} elif (1) {
     exit(4);
+} else {
+    exit(5);
 }
-exit(5);

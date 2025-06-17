@@ -168,12 +168,69 @@ class Generator {
             std::string code;
             size_t current_label = m_label_counter++;
             
+            // Save current stack size
+            size_t old_stack_size = m_stack_size;
+            
+            // Generate code for condition
             code += generate_expr(if_stmt.condition);
+            
             code += "\tldr\tw0, [sp], #16\n";
+            m_stack_size = old_stack_size; // Restore stack size after popping condition
+            
+            // Compare with 0 and branch if equal (false)
             code += "\tcmp\tw0, #0\n";
-            code += "\tb.eq\t.L" + std::to_string(current_label) + "\n"; // if condition is false, jump to the end of the if statement instead of scope
+            const std::string skip_label = ".L" + std::to_string(current_label) + "_skip";
+            code += "\tb.eq\t" + skip_label + "\n";
+            
+            // Generate code for then scope
             code += generate_scope(if_stmt.then_scope);
-            code += "\t.L" + std::to_string(current_label) + ":\n";
+            if (if_stmt.predicate) {
+                const std::string end_label = ".L" + std::to_string(current_label) + "_end";
+                code += "\tb\t" + end_label + "\n";
+                code += skip_label + ":\n";
+
+                code += generate_predicate(*if_stmt.predicate, end_label);
+                code += end_label + ":\n";
+            } else {
+                code += skip_label + ":\n";
+            }
+            return code;
+        }
+
+        std::string generate_predicate(const NodeIfPredicate& predicate, const std::string& end_label) {
+            std::string code;
+            if (std::holds_alternative<NodeIfPredicateElse>(predicate.var)) {
+                const auto& else_predicate = std::get<NodeIfPredicateElse>(predicate.var);
+                code += generate_scope(else_predicate.scope);
+            } else if (std::holds_alternative<NodeIfPredicateElif>(predicate.var)) {
+                const auto& elif_predicate = std::get<NodeIfPredicateElif>(predicate.var);
+                size_t current_label = m_label_counter++;
+                
+                // Save current stack size
+                size_t old_stack_size = m_stack_size;
+                
+                // Generate code for condition
+                code += generate_expr(elif_predicate.condition);
+                
+                code += "\tldr\tw0, [sp], #16\n";
+                m_stack_size = old_stack_size; // Restore stack size after popping condition
+                
+                // Compare with 0 and branch if equal (false)
+                const std::string skip_label = ".L" + std::to_string(current_label) + "_skip";
+                code += "\tcmp\tw0, #0\n";
+                code += "\tb.eq\t" + skip_label + "\n";
+                
+                // Generate code for then scope
+                code += generate_scope(elif_predicate.scope);
+                
+                code += "\tb\t" + end_label + "\n";
+                code += skip_label + ":\n";
+                
+                // Generate code for next predicate (if any)
+                if (elif_predicate.predicate) {
+                    code += generate_predicate(*elif_predicate.predicate, end_label);
+                }
+            }
             return code;
         }
 

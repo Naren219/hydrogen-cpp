@@ -11,6 +11,7 @@
 // Forward declarations
 struct NodeExpr;
 struct NodeStatement;
+struct NodeIfPredicate;
 
 struct NodeExprIntLit {
     Token int_lit;
@@ -64,10 +65,25 @@ struct NodeScope {
 struct NodeStatementIf {
     NodeExpr condition;
     NodeScope then_scope;
+    std::shared_ptr<NodeIfPredicate> predicate;
+};
+
+struct NodeIfPredicateElse {
+    NodeScope scope;
+};
+
+struct NodeIfPredicateElif {
+    NodeExpr condition;
+    NodeScope scope;
+    std::shared_ptr<NodeIfPredicate> predicate;
+};
+
+struct NodeIfPredicate {
+    std::variant<NodeIfPredicateElse, NodeIfPredicateElif> var;
 };
 
 struct NodeStatement {
-    std::variant<NodeStatementExit, NodeStatementLet, NodeStatementIf, NodeScope> expr;
+    std::variant<NodeStatementExit, NodeStatementLet, NodeStatementIf, NodeIfPredicate, NodeScope> expr;
 };
 
 struct NodeProgram {
@@ -147,37 +163,14 @@ public:
 
     NodeProgram parse() {
         NodeProgram program;
-        while (auto token = peek()) {
-            if (token->type == TokenType::_exit) {
-                if (!parse_exit_statement(program)) {
-                    continue;
-                }
-                // Expect semicolon after exit statement
-                if (!consume_expected(TokenType::semi)) {
-                    std::cerr << "Parse error: expected ';' after exit statement" << std::endl;
-                    continue;
-                }
-            } else if (token->type == TokenType::let) {
-                if (!parse_let_statement(program)) {
-                    continue;
-                }
-            } else if (token->type == TokenType::if_) {
-                if (!parse_if_statement(program)) {
-                    continue;
-                }
-            } else if (token->type == TokenType::open_brace) {
-                auto scope = parse_scope();
-                if (scope.has_value()) {
-                    program.statements.push_back(NodeStatement{*scope});
-                }
-            } else if (token->type == TokenType::semi) {
-                // Skip standalone semicolons
-                consume();
-            } else {
-                std::cerr << "Parse error: unexpected token '" << token->value << "'" << std::endl;
-                consume(); // Skip unknown tokens
-            }
+        m_symbols.enter_scope();  // Enter global scope
+        
+        if (!parse_statements(program.statements, true)) {
+            m_symbols.exit_scope();
+            return program;
         }
+        
+        m_symbols.exit_scope();  // Exit global scope
         return program;
     }
 
@@ -193,7 +186,81 @@ private:
         {TokenType::slash, 2}
     };
 
-    bool parse_exit_statement(NodeProgram& program) {
+    bool parse_statements(std::vector<NodeStatement>& statements, bool is_program_scope = false) {
+        while (auto token = peek()) {
+            if (token->type == TokenType::close_brace) {
+                return true;  // End of scope
+            }
+            
+            bool statement_parsed = false;
+            if (token->type == TokenType::_exit) {
+                statement_parsed = parse_exit_statement(statements);
+                if (statement_parsed) {
+                    // Expect semicolon after exit statement
+                    if (!consume_expected(TokenType::semi)) {
+                        std::cerr << "Parse error: expected ';' after exit statement" << std::endl;
+                        return false;
+                    }
+                }
+            } else if (token->type == TokenType::let) {
+                statement_parsed = parse_let_statement(statements);
+                if (!statement_parsed) {
+                    return false;
+                }
+                // Expect semicolon after let statement
+                if (!consume_expected(TokenType::semi)) {
+                    std::cerr << "Parse error: expected ';' after let statement" << std::endl;
+                    return false;
+                }
+            } else if (token->type == TokenType::if_) {
+                statement_parsed = parse_if_statement(statements);
+                if (!statement_parsed) {
+                    return false;
+                }
+            } else if (token->type == TokenType::open_brace) {
+                auto nested_scope = parse_scope();
+                if (nested_scope.has_value()) {
+                    statements.push_back(NodeStatement{*nested_scope});
+                    statement_parsed = true;
+                } else {
+                    return false;
+                }
+            } else if (token->type == TokenType::semi) {
+                // Skip standalone semicolons
+                consume();
+                statement_parsed = true;
+            }
+
+            if (!statement_parsed) {
+                std::cerr << "Parse error: unexpected token '" << token->value << "' in scope" << std::endl;
+                return false;
+            }
+        }
+        
+        // If we're at the end of input and this is the program scope, that's valid
+        if (is_program_scope) {
+            return true;
+        }
+        
+        std::cerr << "Parse error: expected '}' to close scope" << std::endl;
+        return false;
+    }
+
+    std::optional<NodeScope> parse_scope() {
+        m_symbols.enter_scope();  // Enter new scope
+        NodeScope scope;
+        
+        if (!parse_statements(scope.statements)) {
+            m_symbols.exit_scope();  // Exit scope on error
+            return std::nullopt;
+        }
+        
+        consume(); // consume '}'
+        m_symbols.exit_scope();  // Exit scope
+        return scope;
+    }
+
+    bool parse_exit_statement(std::vector<NodeStatement>& statements) {
         consume(); // consume 'exit'
         if (!consume_expected(TokenType::open_paren)) {
             std::cerr << "Parse error: expected '(' after exit keyword" << std::endl;
@@ -209,11 +276,11 @@ private:
             return false;
         }
         NodeStatementExit exit_stmt{*expr};
-        program.statements.push_back(NodeStatement{exit_stmt});
+        statements.push_back(NodeStatement{exit_stmt});
         return true;
     }
 
-    bool parse_let_statement(NodeProgram& program) {
+    bool parse_let_statement(std::vector<NodeStatement>& statements) {
         consume(); // consume 'let'
         auto ident_token = consume_expected(TokenType::ident);
         if (!ident_token.has_value()) {
@@ -241,11 +308,11 @@ private:
             return false;
         }
         NodeStatementLet let_stmt{*ident_token, *expr};
-        program.statements.push_back(NodeStatement{let_stmt});
+        statements.push_back(NodeStatement{let_stmt});
         return true;
     }
 
-    bool parse_if_statement(NodeProgram& program) {
+    bool parse_if_statement(std::vector<NodeStatement>& statements) {
         consume(); // consume 'if'
         if (!consume_expected(TokenType::open_paren)) {
             std::cerr << "Parse error: expected '(' after if keyword" << std::endl;
@@ -269,11 +336,55 @@ private:
             std::cerr << "Parse error: expected scope after if condition" << std::endl;
             return false;
         }
-        NodeStatementIf if_stmt{*condition, *then_scope};
-        program.statements.push_back(NodeStatement{if_stmt});
+        auto predicate = parse_predicate();
+        NodeStatementIf if_stmt{*condition, *then_scope, predicate};
+        statements.push_back(NodeStatement{if_stmt});
         return true;
     }
 
+    std::shared_ptr<NodeIfPredicate> parse_predicate() {
+        if (peek()->type == TokenType::elif) {
+            consume(); // consume 'elif'
+            if (!consume_expected(TokenType::open_paren)) {
+                std::cerr << "Parse error: expected '(' after elif keyword" << std::endl;
+                return nullptr;
+            }
+            auto condition = parse_expr();
+            if (!condition.has_value()) {
+                std::cerr << "Parse error: expected condition in elif predicate" << std::endl;
+                return nullptr;
+            }
+            if (!consume_expected(TokenType::close_paren)) {
+                std::cerr << "Parse error: expected ')' after elif predicate" << std::endl;
+                return nullptr;
+            }
+            if (!consume_expected(TokenType::open_brace)) {
+                std::cerr << "Parse error: expected '{' after elif predicate" << std::endl;
+                return nullptr;
+            }
+            auto elif_scope = parse_scope();
+            if (!elif_scope.has_value()) {
+                std::cerr << "Parse error: expected scope after elif predicate" << std::endl;
+                return nullptr;
+            }
+            auto next_predicate = parse_predicate();
+            return std::make_shared<NodeIfPredicate>(NodeIfPredicateElif{*condition, *elif_scope, next_predicate});
+        } else if (peek()->type == TokenType::else_) {
+            consume(); // consume 'else'
+            if (!consume_expected(TokenType::open_brace)) {
+                std::cerr << "Parse error: expected '{' after else keyword" << std::endl;
+                return nullptr;
+            }
+            auto else_scope = parse_scope();
+            if (!else_scope.has_value()) {
+                std::cerr << "Parse error: expected scope after else predicate" << std::endl;
+                return nullptr;
+            }
+            return std::make_shared<NodeIfPredicate>(NodeIfPredicateElse{*else_scope});
+        }
+        return nullptr; // No elif or else
+    }
+    
     std::optional<Token> peek(size_t offset = 0) const {
         if (m_pos + offset < m_tokens.size()) {
             return m_tokens[m_pos + offset];
@@ -406,153 +517,5 @@ private:
         }
 
         return left;
-    }
-
-    std::optional<NodeScope> parse_scope() {
-        m_symbols.enter_scope();  // Enter new scope
-        NodeScope scope;
-        
-        while (auto token = peek()) {
-            if (token->type == TokenType::close_brace) {
-                consume(); // consume '}'
-                m_symbols.exit_scope();  // Exit scope
-                return scope;
-            }
-            
-            bool statement_parsed = false;
-            if (token->type == TokenType::_exit) {
-                statement_parsed = parse_exit_statement(scope);
-                if (statement_parsed) {
-                    // Expect semicolon after exit statement
-                    if (!consume_expected(TokenType::semi)) {
-                        std::cerr << "Parse error: expected ';' after exit statement" << std::endl;
-                        m_symbols.exit_scope();
-                        return std::nullopt;
-                    }
-                }
-            } else if (token->type == TokenType::let) {
-                statement_parsed = parse_let_statement(scope);
-                if (!statement_parsed) {
-                    m_symbols.exit_scope();
-                    return std::nullopt;
-                }
-                // Expect semicolon after let statement
-                if (!consume_expected(TokenType::semi)) {
-                    std::cerr << "Parse error: expected ';' after let statement" << std::endl;
-                    m_symbols.exit_scope();
-                    return std::nullopt;
-                }
-            } else if (token->type == TokenType::if_) {
-                statement_parsed = parse_if_statement(scope);
-                if (!statement_parsed) {
-                    m_symbols.exit_scope();
-                    return std::nullopt;
-                }
-            } else if (token->type == TokenType::open_brace) {
-                auto nested_scope = parse_scope();
-                if (nested_scope.has_value()) {
-                    scope.statements.push_back(NodeStatement{*nested_scope});
-                    statement_parsed = true;
-                } else {
-                    m_symbols.exit_scope();
-                    return std::nullopt;
-                }
-            } else if (token->type == TokenType::semi) {
-                // Skip standalone semicolons
-                consume();
-                statement_parsed = true;
-            }
-
-            if (!statement_parsed) {
-                std::cerr << "Parse error: unexpected token '" << token->value << "' in scope" << std::endl;
-                m_symbols.exit_scope();
-                return std::nullopt;
-            }
-        }
-        
-        std::cerr << "Parse error: expected '}' to close scope" << std::endl;
-        m_symbols.exit_scope();  // Exit scope even on error
-        return std::nullopt;
-    }
-
-    bool parse_exit_statement(NodeScope& scope) {
-        consume(); // consume 'exit'
-        if (!consume_expected(TokenType::open_paren)) {
-            std::cerr << "Parse error: expected '(' after exit keyword" << std::endl;
-            return false;
-        }
-        auto expr = parse_expr();
-        if (!expr.has_value()) {
-            std::cerr << "Parse error: expected expression in exit statement" << std::endl;
-            return false;
-        }
-        if (!consume_expected(TokenType::close_paren)) {
-            std::cerr << "Parse error: expected ')' after expression in exit statement" << std::endl;
-            return false;
-        }
-        NodeStatementExit exit_stmt{*expr};
-        scope.statements.push_back(NodeStatement{exit_stmt});
-        return true;
-    }
-
-    bool parse_let_statement(NodeScope& scope) {
-        consume(); // consume 'let'
-        auto ident_token = consume_expected(TokenType::ident);
-        if (!ident_token.has_value()) {
-            std::cerr << "Parse error: expected identifier after 'let'" << std::endl;
-            return false;
-        }
-        
-        // Check if variable is already declared in current scope
-        if (!m_symbols.declare(ident_token->value)) {
-            std::cerr << "Parse error: variable '" << ident_token->value << "' already declared in this scope" << std::endl;
-            return false;
-        }
-
-        if (!consume_expected(TokenType::eq)) {
-            std::cerr << "Parse error: expected '=' after identifier in let statement" << std::endl;
-            return false;
-        }
-        auto expr = parse_expr();
-        if (!expr.has_value()) {
-            std::cerr << "Parse error: expected expression after '=' in let statement" << std::endl;
-            return false;
-        }
-        if (!consume_expected(TokenType::semi)) {
-            std::cerr << "Parse error: expected ';' after let statement" << std::endl;
-            return false;
-        }
-        NodeStatementLet let_stmt{*ident_token, *expr};
-        scope.statements.push_back(NodeStatement{let_stmt});
-        return true;
-    }
-
-    bool parse_if_statement(NodeScope& scope) {
-        consume(); // consume 'if'
-        if (!consume_expected(TokenType::open_paren)) {
-            std::cerr << "Parse error: expected '(' after if keyword" << std::endl;
-            return false;
-        }
-        auto condition = parse_expr();
-        if (!condition.has_value()) {
-            std::cerr << "Parse error: expected condition in if statement" << std::endl;
-            return false;
-        }
-        if (!consume_expected(TokenType::close_paren)) {
-            std::cerr << "Parse error: expected ')' after if condition" << std::endl;
-            return false;
-        }
-        if (!consume_expected(TokenType::open_brace)) {
-            std::cerr << "Parse error: expected '{' after if condition" << std::endl;
-            return false;
-        }
-        auto then_scope = parse_scope();
-        if (!then_scope.has_value()) {
-            std::cerr << "Parse error: expected scope after if condition" << std::endl;
-            return false;
-        }
-        NodeStatementIf if_stmt{*condition, *then_scope};
-        scope.statements.push_back(NodeStatement{if_stmt});
-        return true;
     }
 };
